@@ -295,5 +295,18 @@ int main() {
     sprintf_s(outputImage, bufSize, "%s/%s_transfer_%s.%s", outputDir_b, imageName, processMethod, "png");
 
     savePNG(outputImage, image, width, height, false);
+
+    // Удаление массивов, чтобы не занимали память
+    image.clear();
+    reds.clear();
+    greens.clear();
+    blues.clear();
+
+    delete[] startRows, finishRows, startCols, finishCols;
+    startRows = nullptr;
+    finishRows = nullptr;
+    startCols = nullptr;
+    finishCols = nullptr;
+
     return 0;
 }

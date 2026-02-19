@@ -114,12 +114,9 @@ int main() {
     const char *processMethod = "erosion";              // Способ обработки (для имени выходного файла)
 
     const int threshold = 128;                          // Пороговое значение для интенсивности
-    const int step = 2;                                 // Шаг эрозии
+    const int step = 1;                                 // Шаг эрозии
 
-    const bool DEBUG = false;
-
-    // Переменные
-    int threadCount = 16;                               // Кол-во потоков
+    const bool DEBUG = false;            
 
     // Создаем необходимые директории
     _mkdir(inputDir);
@@ -128,173 +125,171 @@ int main() {
     _mkdir(logDir);
     _mkdir(logDir_a);
 
-    // Ииндексы матрицы для каждого из потоков
-    
+    int maxThreads = 2;
 
-    for(int img = 0; img < 4; img++){
-        imageName = images[img];
-        for(int threads = 2; threads < 17; threads+=2) {
-    
-    threadCount = threads;    
-    omp_set_num_threads(threadCount);
-    size_t *startRows = new size_t[threadCount];
-    size_t *finishRows = new size_t[threadCount];
-    size_t *startCols = new size_t[threadCount];
-    size_t *finishCols = new size_t[threadCount];        
-    
     // Проверка доступности OpenMP
     #ifdef _OPENMP
         cout << "OpenMP is active" << endl;
     #else
         cout << "OpenMP is not active" << endl;
-        threadCount = 1;
+        maxThreads = 1;
     #endif
-
-    // Вычисляем делители для числа потоков, чтобы разделить изображение между ними
-    int *divisors = findDvisors(threadCount);
-    int threadRows = divisors[0];
-    int threadCols = divisors[1];
     
-    for(int i = 0; i < 5; i++) {
+    for(int img = 0; img < sizeof(images) / sizeof(images[0]); img++){
+        imageName = images[img];
 
-    vector<unsigned char> image;                    // Массив каналов изображеиня ([R, G, B, A, R, G, B, A, ...])
-    unsigned int width;                             // Ширина изображения
-    unsigned int height;                            // Высота изображения
+        // Получение пути до изображения
+        char inputImage[bufSize];
+        sprintf_s(inputImage, bufSize, "%s/%s.%s", inputDir, imageName, "png");
 
-    // Карта цветов для раскраски экрана
-    ColorMap colorMap(threadCount);
-    uint8_t **colors = colorMap.getColors();
-    
-    // Получение пути до изображения
-    char inputImage[bufSize];
-    sprintf_s(inputImage, bufSize, "%s/%s.%s", inputDir, imageName, "png");
-
-    loadPNG(image, width, height, inputImage);
-
-    vector<vector<int>> matrix(height, vector<int>(width));
-
-    
-
-    if (DEBUG) {
-        cout << threadRows << "x" << threadCols << endl;
-    }
-
-    
-    
-    for (int thread = 0; thread < threadCount; thread++) {
-        startRows[thread] = (thread / threadCols) * height / threadRows;
-        finishRows[thread] = (thread / threadCols + 1) * height / threadRows;
-        startCols[thread] = (thread % threadCols) * width / threadCols;
-        finishCols[thread] = (thread % threadCols + 1) * width / threadCols;
-    }
-
-    auto timerStart = chrono::high_resolution_clock::now();
-
-    // Параллельные операции
-    # pragma omp parallel
-    {
-        // ID потока
-        int id_thread = omp_get_thread_num();
-
-        uint8_t *threadColor = colors[id_thread];
-
-        if (DEBUG) {
-            printf("Thread %d\n"
-                "Cols: %dx%d\n"
-                "Rows: %dx%d\n",
-                id_thread,
-                (int) startCols[id_thread], (int) finishCols[id_thread],
-                (int) startRows[id_thread], (int) finishRows[id_thread]);
-        }
-
-        // Обрабатываем изображение по отдельным каналам, игнорируем Alpha.
-        // Вычисляем интенсивность
-        for(size_t row = startRows[id_thread]; row < finishRows[id_thread]; row++) {
-            for(size_t col = startCols[id_thread]; col < finishCols[id_thread]; col++) {
-                size_t pixel = row * 4 * width + 4 * col;       // Индекс пикселя
-                int intensity = (image[pixel] +                 // Red
-                                image[pixel + 1] +              // Green
-                                image[pixel + 2]) / 3;          // Blue
+        for(int threads = 1; threads < maxThreads; threads+=2) {
+            // Переменные 
+            int threadCount = threads;                      // Кол-во потоков
             
-                // Заполняем матрицу: 0 для интенсивности меньше порога;
-                // 1 для интенсивности большей или равной порогу
-                matrix[row][col] = intensity >= threshold;
+            vector<unsigned char> image;                    // Массив каналов изображеиня ([R, G, B, A, R, G, B, A, ...])
+            unsigned int width;                             // Ширина изображения
+            unsigned int height;                            // Высота изображения 
 
-                for(int i = 0; i < 3; i++) {
-                    image[pixel + i] = matrix[row][col];
+            omp_set_num_threads(threadCount);
+
+            // Карта цветов для раскраски экрана
+            ColorMap colorMap(threadCount);
+            uint8_t **colors = colorMap.getColors();
+
+            // Вычисляем делители для числа потоков, чтобы разделить изображение между ними
+            int *divisors = findDvisors(threadCount);
+            int threadRows = divisors[0];
+            int threadCols = divisors[1];    
+            
+            if (DEBUG) {
+                cout << threadRows << "x" << threadCols << endl;
+            }
+            
+            for(int i = 0; i < 5; i++) {
+                loadPNG(image, width, height, inputImage);
+
+                // Индексы матрицы для каждого из потоков
+                size_t *startRows = new size_t[threadCount];
+                size_t *finishRows = new size_t[threadCount];
+                size_t *startCols = new size_t[threadCount];
+                size_t *finishCols = new size_t[threadCount];    
+                
+                for (int thread = 0; thread < threadCount; thread++) {
+                    startRows[thread] = (thread / threadCols) * height / threadRows;
+                    finishRows[thread] = (thread / threadCols + 1) * height / threadRows;
+                    startCols[thread] = (thread % threadCols) * width / threadCols;
+                    finishCols[thread] = (thread % threadCols + 1) * width / threadCols;
                 }
-            }
-        }
 
-        // Окрашиваем изображение
-        paintImage(&image, width,
-                   startRows[id_thread], finishRows[id_thread],
-                   startCols[id_thread], finishCols[id_thread],
-                   colors[id_thread]);
+                vector<vector<int>> matrix(height, vector<int>(width));
+                
+                auto timerStart = chrono::high_resolution_clock::now();
 
-    }
+                // Параллельные операции
+                # pragma omp parallel
+                {
+                    // ID потока
+                    int id_thread = omp_get_thread_num();
 
-    // Получение пути до обработанного изображения
-    char outputImage[bufSize];
-    sprintf_s(outputImage, bufSize, "%s/%s_%dthreads_result.%s", outputDir_a, imageName, threadCount, "png");
+                    uint8_t *threadColor = colors[id_thread];
 
-    savePNG(outputImage, image, width, height, false);
+                    if (DEBUG) {
+                        printf("Thread %d\n"
+                            "Cols: %dx%d\n"
+                            "Rows: %dx%d\n",
+                            id_thread,
+                            (int) startCols[id_thread], (int) finishCols[id_thread],
+                            (int) startRows[id_thread], (int) finishRows[id_thread]);
+                    }
 
-    // Параллельные операции
-    # pragma omp parallel
-    {
-        // Получаем id потока
-        int id_thread = omp_get_thread_num();
+                    // Обрабатываем изображение по отдельным каналам, игнорируем Alpha.
+                    // Вычисляем интенсивность
+                    for(size_t row = startRows[id_thread]; row < finishRows[id_thread]; row++) {
+                        for(size_t col = startCols[id_thread]; col < finishCols[id_thread]; col++) {
+                            size_t pixel = row * 4 * width + 4 * col;       // Индекс пикселя
+                            int intensity = (image[pixel] +                 // Red
+                                            image[pixel + 1] +              // Green
+                                            image[pixel + 2]) / 3;          // Blue
+                        
+                            // Заполняем матрицу: 0 для интенсивности меньше порога;
+                            // 1 для интенсивности большей или равной порогу
+                            matrix[row][col] = intensity >= threshold;
 
-        // Проводим операцию эрозии
-        for(size_t row = startRows[id_thread]; row < finishRows[id_thread]; row++) {
-            for(size_t col = startCols[id_thread]; col < finishCols[id_thread]; col++) {
-                size_t pixel = row * 4 * width + 4 * col;
-                int result = erode(&matrix, row, col, step);
-                for(int i = 0; i < 3; i++) {
-                    image[pixel + i] = result;
+                            for(int i = 0; i < 3; i++) {
+                                image[pixel + i] = matrix[row][col];
+                            }
+                        }
+                    }
+
+                    // Окрашиваем изображение
+                    paintImage(&image, width,
+                            startRows[id_thread], finishRows[id_thread],
+                            startCols[id_thread], finishCols[id_thread],
+                            colors[id_thread]);
+
                 }
+
+                // Получение пути до обработанного изображения
+                char outputImage[bufSize];
+                sprintf_s(outputImage, bufSize, "%s/%s_%dthreads_result.%s", outputDir_a, imageName, threadCount, "png");
+
+                savePNG(outputImage, image, width, height, false);
+
+                // Параллельные операции
+                # pragma omp parallel
+                {
+                    // Получаем id потока
+                    int id_thread = omp_get_thread_num();
+
+                    // Проводим операцию эрозии
+                    for(size_t row = startRows[id_thread]; row < finishRows[id_thread]; row++) {
+                        for(size_t col = startCols[id_thread]; col < finishCols[id_thread]; col++) {
+                            size_t pixel = row * 4 * width + 4 * col;
+                            int result = erode(&matrix, row, col, step);
+                            for(int i = 0; i < 3; i++) {
+                                image[pixel + i] = result;
+                            }
+                        }
+                    }
+
+                    // Окрашиваем изображение
+                    paintImage(&image, width,
+                            startRows[id_thread], finishRows[id_thread],
+                            startCols[id_thread], finishCols[id_thread],
+                            colors[id_thread]);
+
+                }
+                    
+                auto timerFinish = chrono::high_resolution_clock::now();
+                chrono::duration<double, milli> timerDuration = timerFinish - timerStart;
+            
+                printf("Threads exectution time = %.4f milliseconds\n", timerDuration.count());
+
+                LogRecord_a logRecord(imageName,
+                                    width, height,
+                                    threshold, step,
+                                    threadCount, timerDuration.count());
+
+                saveLog(logRecord, logDir_a);
+
+                // Получение пути до обработанного изображения с эрозией
+                sprintf_s(outputImage, bufSize,
+                        "%s/%s_%dthreads_result_%s.%s",
+                        outputDir_a, imageName, threadCount, processMethod, "png");
+
+                savePNG(outputImage, image, width, height, false);
+            
+                // Удаление массивов, чтобы не занимали память
+                image.clear();
+                matrix.clear();
+
+                delete[] startRows, finishRows, startCols, finishCols;
+                startRows = nullptr;
+                finishRows = nullptr;
+                startCols = nullptr;
+                finishCols = nullptr;
+
             }
-        }
-
-        // Окрашиваем изображение
-        paintImage(&image, width,
-                   startRows[id_thread], finishRows[id_thread],
-                   startCols[id_thread], finishCols[id_thread],
-                   colors[id_thread]);
-
-    }
-        
-    auto timerFinish = chrono::high_resolution_clock::now();
-    chrono::duration<double, milli> timerDuration = timerFinish - timerStart;
-  
-    printf("Threads exectution time = %.4f milliseconds\n", timerDuration.count());
-
-    LogRecord_a logRecord(imageName,
-                          width, height,
-                          threshold, step,
-                          threadCount, timerDuration.count());
-
-    saveLog(logRecord, logDir_a);
-
-    // Получение пути до обработанного изображения с эрозией
-    sprintf_s(outputImage, bufSize,
-              "%s/%s_%dthreads_result_%s.%s",
-              outputDir_a, imageName, threadCount, processMethod, "png");
-
-    savePNG(outputImage, image, width, height, false);
-  
-    // Удаление массивов, чтобы не занимали память
-    image.clear();
-    matrix.clear();
-
-            }
-    delete[] startRows, finishRows, startCols, finishCols;
-    startRows = nullptr;
-    finishRows = nullptr;
-    startCols = nullptr;
-    finishCols = nullptr;
-    
         }
     }
     
